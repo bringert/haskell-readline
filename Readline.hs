@@ -1,6 +1,7 @@
 -- Copyright (C) Anders Carlsson, Bjorn Bringert
 module Readline (readline, addHistory) where
 
+import Control.Exception (finally)
 import Control.Monad
 import Data.Char (isSpace)
 import Data.IORef
@@ -18,6 +19,7 @@ data Command
     | HistoryPrev
     | HistoryNext
     | Complete
+    | EndOfFile
     deriving Show
 
 data Cursor 
@@ -176,7 +178,8 @@ commands =
      ("\ESC[3~", DeleteCurr),
      ("\ESC[A",  HistoryPrev),
      ("\ESC[B",  HistoryNext),
-     ("\t",      Complete)
+     ("\t",      Complete),
+     ("\EOT",    EndOfFile)
     ]
      
 getCommand :: Commands -> IO Command
@@ -247,6 +250,7 @@ commandLoop st@(ReadState{chars = cs@(xs,ys), historyState = (h1,h2) }) =
 				  Nothing -> do debug ("No completion: " ++ show pref)
 				                -- FIXME: beep?
 					        commandLoop st 
+		    EndOfFile | null xs && null ys -> return st{ gotEOF = True }
 		    _ -> commandLoop st
 	   where loop = commandLoop . modifyChars st
 		 loopHistory cf hf = commandLoop $ modifyChars (modifyHistoryState st hf) cf
@@ -261,11 +265,11 @@ withNoBuffOrEcho m =
     hSetBuffering stdin NoBuffering
     hSetBuffering stdout NoBuffering
     hSetEcho stdout False
-    x <- m
-    hSetBuffering stdin oldInBuf
-    hSetBuffering stdout oldOutBuf
-    hSetEcho stdout oldEcho
-    return x
+    m `finally` restore oldInBuf oldOutBuf oldEcho
+    where restore oldInBuf oldOutBuf oldEcho =
+	      do hSetBuffering stdin oldInBuf
+		 hSetBuffering stdout oldOutBuf
+		 hSetEcho stdout oldEcho
 
 -- FIXME: restore terminal settings if interrupted
 readline :: String -> IO (Maybe String)	    
@@ -274,4 +278,7 @@ readline prompt =
        hFlush stdout
        st <- initState
        st' <- withNoBuffOrEcho (commandLoop st)
-       return $ Just $ toList $ chars st'
+       if gotEOF st' then
+	  return Nothing 
+	 else
+          return $ Just $ toList $ chars st'
