@@ -1,6 +1,8 @@
 -- Copyright (C) Anders Carlsson, Bjorn Bringert
 module Readline (readline, addHistory) where
 
+import DirectoryExt
+
 import Control.Exception (finally)
 import Control.Monad
 import Data.Char (isSpace)
@@ -8,7 +10,7 @@ import Data.IORef
 import Data.List (isPrefixOf)
 import System.IO
 import System.IO.Unsafe (unsafePerformIO)
-import System.Directory (getCurrentDirectory, getDirectoryContents)
+import System.Directory (getCurrentDirectory, getDirectoryContents, doesDirectoryExist)
 
 data Command 
     = Move Cursor
@@ -20,14 +22,14 @@ data Command
     | HistoryNext
     | Complete
     | EndOfFile
-    deriving Show
+    deriving (Eq, Ord, Show, Read)
 
 data Cursor 
     = Previous
     | Next
     | Home
     | End
-    deriving Show
+      deriving (Eq, Ord, Show, Read)
 
 type Commands = 
     [(String, Command)]
@@ -36,10 +38,15 @@ data ReadState =
     ReadState { chars :: (String, String),
 		historyState :: ([String],[String]),
 		gotEOF :: Bool }
+    deriving (Eq, Ord, Show, Read)
 
+data Completion = FullCompletion String
+		| PartialCompletion String
+		| AmbiguousCompletion [String]
+		| NoCompletion
+		  deriving (Eq, Ord, Show, Read)
 
-
-debug = appendFile "debug.log"
+debug s = appendFile "debug.log" (s ++ "\n")
 
 --
 -- * Utilities
@@ -144,22 +151,30 @@ replaceLine old new =
 -- * Tab completion
 --
 
--- FIXME: allow C-d and/or double tab and/or asking to display all
-getCompletion :: String -> IO (Maybe String)
+getCompletion :: String -> IO Completion
 getCompletion pref =
     do
     cs <- getCompletions pref
+    debug ("Possible completions for " ++ show pref ++ ": " ++ show cs)
     case cs of
-	    [] -> return Nothing
-	    [x] -> return $ Just x
-	    xs -> return Nothing
+	    [] -> return NoCompletion
+	    [x] -> do
+		   isDir <- doesDirectoryExist x
+		   return $ if isDir then
+		      PartialCompletion (x ++ pathSeparator)
+		    else
+		      FullCompletion x
+	    xs -> return $ AmbiguousCompletion xs
 
+-- FIXME: ignore hidden files?
 getCompletions :: String -> IO [String]
 getCompletions pref =
     do
     pwd <- getCurrentDirectory
-    fs <- getDirectoryContents pwd
-    return $ filter (pref `isPrefixOf`) fs
+    let p = resolvePath pwd pref
+	(d,f) = getDirFile p
+    fs <- getDirectoryContents d
+    return [ d ++ f' | f' <- fs, f `isPrefixOf` f']
 
 --
 -- * Input to Command
@@ -186,7 +201,7 @@ getCommand :: Commands -> IO Command
 getCommand cs = 
     do c <- hGetChar stdin
        -- FIXME: remove
-       debug (show c ++ "\n")
+       debug (show c)
        let cs' = [(ss, command) | ((s:ss), command) <- cs, s == c]
        case cs' of 
 		[] -> return $ Char c
@@ -197,7 +212,7 @@ getCommand cs =
 commandLoop :: ReadState -> IO ReadState
 commandLoop st@(ReadState{chars = cs@(xs,ys), historyState = (h1,h2) }) =
     do command <- getCommand commands
-       debug (show (historyState st) ++ "\n")
+       debug (show (historyState st))
        case command of
 		    Move Previous | not (null xs) ->
 			   do moveLeft 1
@@ -242,14 +257,26 @@ commandLoop st@(ReadState{chars = cs@(xs,ys), historyState = (h1,h2) }) =
 			   let pref = reverse $ takeWhile (not.isSpace) xs
 			   x <- getCompletion pref
 			   case x of 
-				  Just s -> do let s' = drop (length pref) s ++ " "
+				  FullCompletion s -> do 
+						let s' = drop (length pref) s ++ " "
+						putStr (s'++ys)
+						debug ("completing " ++ show pref ++ " to " ++ show s)
+						moveLeft (length ys)
+						loop $ insert s' 
+				  PartialCompletion s -> do
+					       let s' = drop (length pref) s
 					       putStr (s'++ys)
-					       debug ("complete: " ++ s)
+					       debug ("partial completion: " ++ show pref ++ " to " ++ show s)
 					       moveLeft (length ys)
-					       loop $ insert s' 
-				  Nothing -> do debug ("No completion: " ++ show pref)
-				                -- FIXME: beep?
-					        commandLoop st 
+					       loop $ insert s'
+				  NoCompletion -> do 
+						  debug ("No completion for prefix " ++ show pref)
+				                  -- FIXME: beep?
+						  commandLoop st 
+				  AmbiguousCompletion xs -> do
+						 debug ("Ambiguous completion for prefix " ++ show pref)
+						 -- FIXME: allow C-d and/or double tab and/or asking to display all
+						 commandLoop st
 		    EndOfFile | null xs && null ys -> return st{ gotEOF = True }
 		    _ -> commandLoop st
 	   where loop = commandLoop . modifyChars st
