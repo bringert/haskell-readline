@@ -12,9 +12,15 @@
 -- A simple readline replacement module in pure Haskell.
 --
 -- TODO
--- 
--- - Support undo
--- - Support yanking (pasting) 
+--
+-- * Support non-vt100 terminals
+-- * Support non-posix pathnames in tab completion
+-- * Support .inputrc
+-- * Show alternatives when completion is ambiguous
+-- * Restore terminal settings when interrupted
+-- * ifdef away echoing stuff for Hugs support
+-- * Support undo
+-- * Support yanking (pasting) 
 --
 -----------------------------------------------------------
 module Readline (readline, addHistory) where
@@ -66,7 +72,8 @@ data Completion = FullCompletion String
 		| NoCompletion
 		  deriving (Eq, Ord, Show, Read)
 
-debug s = appendFile "debug.log" (s ++ "\n")
+debug s = return ()
+--debug s = appendFile "debug.log" (s ++ "\n")
 
 --
 -- * Escape sequences
