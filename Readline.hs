@@ -1,5 +1,5 @@
 -- Copyright (C) Anders Carlsson, Bjorn Bringert
-module Readline (readline) where
+module Readline (readline, addHistory) where
 
 import Control.Monad
 import Data.IORef
@@ -28,7 +28,21 @@ type Commands =
 
 data ReadState = 
     ReadState { chars :: (String, String),
+		historyState :: ([String],[String]),
 		gotEOF :: Bool }
+
+
+
+debug = appendFile "debug.log"
+
+--
+-- * Utilities
+--
+
+atLeast :: Int -> [a] -> Bool
+atLeast n _ | n <= 0 = True
+atLeast n [] = False
+atLeast n (x:xs) = atLeast (n-1) xs
 
 --
 -- * List with a cursor
@@ -36,34 +50,69 @@ data ReadState =
 
 type CursorList a = ([a],[a])
 
+mkCursorList :: [a] -> CursorList a
+mkCursorList xs = (reverse xs,[])
 
+toList :: CursorList a -> [a]
+toList (xs,ys) = reverse xs ++ ys
+
+previous :: CursorList a -> CursorList a
+previous (x:xs,ys) = (xs,x:ys)
+
+next :: CursorList a -> CursorList a
+next (xs,y:ys) = (y:xs,ys)
+
+toStart :: CursorList a -> CursorList a
+toStart l = ([], toList l)
+
+toEnd :: CursorList a -> CursorList a
+toEnd (xs,ys) = (xs ++ reverse ys, [])
+
+insert :: a -> CursorList a -> CursorList a
+insert x (xs,ys) = (x:xs, ys)
+
+set :: [a] -> CursorList a -> CursorList a
+set xs _ = mkCursorList xs
+
+setNext :: a -> CursorList a -> CursorList a
+setNext x (xs,_:ys) = (xs, x:ys)
 
 --
 -- * Edit state
 --
 
-initState :: ReadState
+initState :: IO ReadState
 initState = 
-    ReadState { chars = ("",""), gotEOF = False }
+    do
+    h <- getHistory
+    return ReadState { chars = mkCursorList "", 
+		       historyState = (h,[""]),
+		       gotEOF = False }
 
-{-# NOINLINE state #-}
-state :: IORef ReadState
-state = unsafePerformIO (newIORef initState)
+modifyChars :: ReadState -> ((String,String) -> (String,String)) -> ReadState
+modifyChars st@(ReadState{ chars = cs}) f = st{ chars = f cs }
 
-clearState :: IO ()
-clearState = writeIORef state initState
+modifyHistoryState :: ReadState -> (([String],[String]) -> ([String],[String])) -> ReadState
+modifyHistoryState st@(ReadState{ historyState = hs }) f = st { historyState = f hs }
 
-getState :: IO ReadState
-getState = readIORef state
+--
+-- * History
+--
 
-modifyState :: (ReadState -> ReadState) -> IO ()
-modifyState f = modifyIORef state f
+type History = [String]
 
-getChars :: IO (String,String)
-getChars = liftM chars getState
+{-# NOINLINE history #-}
+history :: IORef History
+history = unsafePerformIO (newIORef initHistory)
 
-modifyChars :: ((String,String) -> (String,String)) -> IO ()
-modifyChars f = modifyState (\st -> st { chars = f (chars st) })
+initHistory :: History
+initHistory = []
+
+addHistory :: String -> IO ()
+addHistory str = modifyIORef history (str:)
+
+getHistory :: IO History
+getHistory = readIORef history
 
 --
 -- * Cursor movement
@@ -77,6 +126,13 @@ moveLeft n = putStr $ concat $ replicate n prevStr
 
 moveRight :: Int -> IO ()
 moveRight n = putStr $ concat $ replicate n nextStr
+
+replaceLine :: String -> String -> IO ()
+replaceLine old new = 
+    do moveLeft (length old)
+       let sp = replicate (length old - length new) ' '
+       putStr (new ++ sp)
+       moveLeft (length sp)
 
 --
 -- * Input to Command
@@ -101,7 +157,7 @@ getCommand :: Commands -> IO Command
 getCommand cs = 
     do c <- hGetChar stdin
        -- FIXME: remove
-       appendFile "debug.log" (show c ++ "\n")
+       debug (show c ++ "\n")
        let cs' = [(ss, command) | ((s:ss), command) <- cs, s == c]
        case cs' of 
 		[] -> return $ Char c
@@ -109,47 +165,52 @@ getCommand cs =
 		_ -> getCommand cs'
 
 
-commandLoop :: IO ()
-commandLoop =
+commandLoop :: ReadState -> IO ReadState
+commandLoop st@(ReadState{chars = cs@(xs,ys), historyState = (h1,h2) }) =
     do command <- getCommand commands
-       (xs,ys) <- getChars
+       debug (show (historyState st) ++ "\n")
        case command of
 		    Move Previous | not (null xs) ->
-			   do modifyChars $ \ (x:xs, ys) -> (xs, x:ys)
-			      moveLeft 1
-			      commandLoop
+			   do moveLeft 1
+			      loop previous
 		    Move Next | not (null ys) ->
-			   do modifyChars $ \ (xs, y:ys) -> (y:xs, ys)
-			      moveRight 1
-			      commandLoop
+			   do moveRight 1
+			      loop next
 		    Move Home ->
-			   do modifyChars $ \ (xs, ys) -> ("", reverse xs ++ ys)
-			      moveLeft (length xs)
-			      commandLoop
+			   do moveLeft (length xs)
+			      loop toStart
 		    Move End ->
-			   do modifyChars $ \ (xs, ys) -> (xs ++ ys, "")
-			      moveRight (length ys)
-			      commandLoop
+			   do moveRight (length ys)
+			      loop toEnd
 		    Char c -> 
-			   do modifyChars $ \ (xs, ys) -> (c:xs, ys)
-			      putStr (c:ys)
+			   do putStr (c:ys)
 			      moveLeft (length ys)
-			      commandLoop
+			      loop $ insert c
 		    DeletePrev | not (null xs) ->
-			   do modifyChars $ \ (_:xs, ys) -> (xs, ys)
-			      moveLeft 1
+			   do moveLeft 1
 			      let ys' = ys ++ " "
 			      putStr ys'
 			      moveLeft (length ys')
-			      commandLoop
+			      loop $ \ (_:xs, ys) -> (xs, ys)
 		    DeleteCurr | not (null ys) ->
-			   do modifyChars $ \ (xs, _:ys) -> (xs, ys)
-			      let ys' = drop 1 ys ++ " "
+			   do let ys' = drop 1 ys ++ " "
 			      putStr ys'
 			      moveLeft (length ys')
-			      commandLoop
-		    Accept -> putStrLn ""
-		    _ -> commandLoop
+			      loop $ \ (xs, _:ys) -> (xs, ys)
+		    HistoryPrev | not (null h1) ->
+			   do let h = head h1
+			      replaceLine xs h
+			      loopHistory (set h) (previous . setNext (toList cs))
+		    HistoryNext | atLeast 2 h2 ->
+			   do let _:h:_ = h2
+			      replaceLine xs h
+			      loopHistory (set h) (next . setNext (toList cs))
+		    Accept -> 
+			   do putStrLn ""
+			      return st
+		    _ -> do commandLoop st
+	   where loop = commandLoop . modifyChars st
+		 loopHistory cf hf = commandLoop $ modifyChars (modifyHistoryState st hf) cf
 
 withNoBuffOrEcho :: IO a -> IO a
 withNoBuffOrEcho m = 
@@ -171,10 +232,9 @@ readline :: String -> IO (Maybe String)
 readline prompt =
     do hPutStr stdout prompt
        hFlush stdout
-       withNoBuffOrEcho commandLoop
-       (xs,ys) <- getChars
-       clearState
-       return $ Just $ reverse xs ++ ys
+       st <- initState
+       st' <- withNoBuffOrEcho (commandLoop st)
+       return $ Just $ toList $ chars st'
 
 
 
