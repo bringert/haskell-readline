@@ -10,7 +10,7 @@ import Data.IORef
 import Data.List (isPrefixOf)
 import System.IO
 import System.IO.Unsafe (unsafePerformIO)
-import System.Directory (getCurrentDirectory, getDirectoryContents, doesDirectoryExist)
+import System.Directory (getDirectoryContents, doesDirectoryExist)
 
 data Command 
     = Move Cursor
@@ -170,10 +170,9 @@ getCompletion pref =
 getCompletions :: String -> IO [String]
 getCompletions pref =
     do
-    pwd <- getCurrentDirectory
-    let p = resolvePath pwd pref
-	(d,f) = getDirFile p
-    fs <- getDirectoryContents d
+    let (d,f) = getDirFile pref
+	d' = if d == "" then "." else d
+    fs <- getDirectoryContents d'
     return [ d ++ f' | f' <- fs, f `isPrefixOf` f']
 
 --
