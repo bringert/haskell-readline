@@ -1,8 +1,17 @@
-test: *.hs
-	ghc --make -o test test.hs
+GHC = ghc
+GHCFLAGS = -package-conf $(HOME)/.ghc-packages
 
-unittests: 
-	runhugs -P:/home/bjorn/src/HUnit-1.0/ DirectoryExtTests.hs
+test: *.hs
+	$(GHC) $(GHCFLAGS) --make -o $@ test.hs
+
+unittests: *.hs
+	$(GHC) $(GHCFLAGS) --make -o $@ DirectoryExtTests.hs
+
+check: unittests
+	./unittests
+
+setup: Setup.lhs
+	$(GHC) $(GHCFLAGS) --make -o $@ $^
 
 clean:
-	-rm -f *.o *.hi test
+	-rm -f *.o *.hi setup test unittests
