@@ -1,9 +1,10 @@
 -- Copyright (C) Anders Carlsson, Bjorn Bringert
 module Readline (readline) where
 
-import System.IO
-import Data.IORef
 import Control.Monad
+import Data.IORef
+import System.IO
+import System.IO.Unsafe (unsafePerformIO)
 
 data Command 
     = Move Cursor
@@ -30,6 +31,14 @@ data ReadState =
 		gotEOF :: Bool }
 
 --
+-- * List with a cursor
+--
+
+type CursorList a = ([a],[a])
+
+
+
+--
 -- * Edit state
 --
 
@@ -37,18 +46,24 @@ initState :: ReadState
 initState = 
     ReadState { chars = ("",""), gotEOF = False }
 
-atBeginning :: IORef ReadState -> IO Bool
-atBeginning stateRef = liftM (null . fst . chars) $ readIORef stateRef
+{-# NOINLINE state #-}
+state :: IORef ReadState
+state = unsafePerformIO (newIORef initState)
 
-atEnd :: IORef ReadState -> IO Bool
-atEnd stateRef = liftM (null . snd . chars) $ readIORef stateRef
+clearState :: IO ()
+clearState = writeIORef state initState
 
-getChars :: IORef ReadState -> IO (String,String)
-getChars = liftM chars . readIORef
+getState :: IO ReadState
+getState = readIORef state
 
-modifyChars ::  IORef ReadState 
-	    -> ((String,String) -> (String,String)) -> IO ()
-modifyChars r f = modifyIORef r (\st -> st { chars = f (chars st) })
+modifyState :: (ReadState -> ReadState) -> IO ()
+modifyState f = modifyIORef state f
+
+getChars :: IO (String,String)
+getChars = liftM chars getState
+
+modifyChars :: ((String,String) -> (String,String)) -> IO ()
+modifyChars f = modifyState (\st -> st { chars = f (chars st) })
 
 --
 -- * Cursor movement
@@ -74,6 +89,8 @@ commands =
      (nextStr, Move Next),
      ("\SOH", Move Home),
      ("\ENQ", Move End),
+     ("\ESC[H", Move Home),
+     ("\ESC[F", Move End),
      ("\DEL", DeletePrev),
      ("\ESC[3~", DeleteCurr),
      ("\ESC[A", HistoryPrev),
@@ -84,7 +101,7 @@ getCommand :: Commands -> IO Command
 getCommand cs = 
     do c <- hGetChar stdin
        -- FIXME: remove
-       appendFile "debug.log" (show c)
+       appendFile "debug.log" (show c ++ "\n")
        let cs' = [(ss, command) | ((s:ss), command) <- cs, s == c]
        case cs' of 
 		[] -> return $ Char c
@@ -92,49 +109,47 @@ getCommand cs =
 		_ -> getCommand cs'
 
 
-commandLoop :: IORef ReadState -> IO ()
-commandLoop stateRef =
+commandLoop :: IO ()
+commandLoop =
     do command <- getCommand commands
-       (xs,ys) <- liftM chars $ readIORef stateRef
+       (xs,ys) <- getChars
        case command of
 		    Move Previous | not (null xs) ->
-			   do mc $ \ (x:xs, ys) -> (xs, x:ys)
+			   do modifyChars $ \ (x:xs, ys) -> (xs, x:ys)
 			      moveLeft 1
-			      continue
+			      commandLoop
 		    Move Next | not (null ys) ->
-			   do mc $ \ (xs, y:ys) -> (y:xs, ys)
+			   do modifyChars $ \ (xs, y:ys) -> (y:xs, ys)
 			      moveRight 1
-			      continue
+			      commandLoop
 		    Move Home ->
-			   do mc $ \ (xs, ys) -> ("", reverse xs ++ ys)
+			   do modifyChars $ \ (xs, ys) -> ("", reverse xs ++ ys)
 			      moveLeft (length xs)
-			      continue
+			      commandLoop
 		    Move End ->
-			   do mc $ \ (xs, ys) -> (xs ++ ys, "")
+			   do modifyChars $ \ (xs, ys) -> (xs ++ ys, "")
 			      moveRight (length ys)
-			      continue
+			      commandLoop
 		    Char c -> 
-			   do mc $ \ (xs, ys) -> (c:xs, ys)
+			   do modifyChars $ \ (xs, ys) -> (c:xs, ys)
 			      putStr (c:ys)
 			      moveLeft (length ys)
-			      continue
+			      commandLoop
 		    DeletePrev | not (null xs) ->
-			   do mc $ \ (_:xs, ys) -> (xs, ys)
+			   do modifyChars $ \ (_:xs, ys) -> (xs, ys)
 			      moveLeft 1
 			      let ys' = ys ++ " "
 			      putStr ys'
 			      moveLeft (length ys')
-			      continue
+			      commandLoop
 		    DeleteCurr | not (null ys) ->
-			   do mc $ \ (xs, _:ys) -> (xs, ys)
+			   do modifyChars $ \ (xs, _:ys) -> (xs, ys)
 			      let ys' = drop 1 ys ++ " "
 			      putStr ys'
 			      moveLeft (length ys')
-			      continue
+			      commandLoop
 		    Accept -> putStrLn ""
-		    _ -> continue
-       where mc = modifyChars stateRef
-	     continue = commandLoop stateRef
+		    _ -> commandLoop
 
 withNoBuffOrEcho :: IO a -> IO a
 withNoBuffOrEcho m = 
@@ -154,11 +169,11 @@ withNoBuffOrEcho m =
 -- FIXME: restore terminal settings if interrupted
 readline :: String -> IO (Maybe String)	    
 readline prompt =
-    do stateRef <- newIORef initState
-       hPutStr stdout prompt
+    do hPutStr stdout prompt
        hFlush stdout
-       withNoBuffOrEcho (commandLoop stateRef)
-       (xs,ys) <- getChars stateRef
+       withNoBuffOrEcho commandLoop
+       (xs,ys) <- getChars
+       clearState
        return $ Just $ reverse xs ++ ys
 
 
