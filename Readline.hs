@@ -17,11 +17,13 @@ data Command
     | Accept
     | DeletePrev
     | DeleteCurr
+    | DeleteToEnd
     | Char Char
     | HistoryPrev
     | HistoryNext
     | Complete
     | EndOfFile
+    | Undo
     deriving (Eq, Ord, Show, Read)
 
 data Cursor 
@@ -47,6 +49,35 @@ data Completion = FullCompletion String
 		  deriving (Eq, Ord, Show, Read)
 
 debug s = appendFile "debug.log" (s ++ "\n")
+
+--
+-- * Escape sequences
+--
+
+prevStr = "\ESC[D"
+nextStr = "\ESC[C"
+
+commands :: Commands
+commands = 
+    [("\n",      Accept),        -- Enter
+     ("\ESC[D",  Move Previous), -- left arrow
+     ("\STX",    Move Previous), -- C-b
+     ("\ESC[C",  Move Next),     -- right arrow
+     ("\ACK",    Move Next),     -- C-f
+     ("\SOH",    Move Home),     -- C-a
+     ("\ESC[H",  Move Home),     -- Home
+     ("\ENQ",    Move End),      -- C-e
+     ("\ESC[F",  Move End),      -- End
+     ("\DEL",    DeletePrev),    -- Backspace
+     ("\ESC[3~", DeleteCurr),    -- Del
+     ("\v",      DeleteToEnd),   -- C-k
+     ("\ESC[A",  HistoryPrev),   -- up arrow
+     ("\ESC[B",  HistoryNext),   -- down arrow
+     ("\t",      Complete),      -- tab
+     ("\EOT",    EndOfFile),     -- C-d
+     ("\US",     Undo),          -- C-_
+     ("\CAN\NAK", Undo)          -- C-x C-u
+    ]
 
 --
 -- * Utilities
@@ -131,9 +162,6 @@ getHistory = readIORef history
 -- * Cursor movement
 --
 
-prevStr = "\ESC[D"
-nextStr = "\ESC[C"
-
 moveLeft :: Int -> IO ()
 moveLeft n = putStr $ concat $ replicate n prevStr
 
@@ -178,23 +206,6 @@ getCompletions pref =
 --
 -- * Input to Command
 --
-
-commands :: Commands
-commands = 
-    [("\n",      Accept),
-     ("\ESC[D",  Move Previous),
-     ("\ESC[C",  Move Next),
-     ("\SOH",    Move Home),
-     ("\ESC[H",  Move Home),
-     ("\ENQ",    Move End),
-     ("\ESC[F",  Move End),
-     ("\DEL",    DeletePrev),
-     ("\ESC[3~", DeleteCurr),
-     ("\ESC[A",  HistoryPrev),
-     ("\ESC[B",  HistoryNext),
-     ("\t",      Complete),
-     ("\EOT",    EndOfFile)
-    ]
      
 getCommand :: Commands -> IO Command
 getCommand cs = 
@@ -240,6 +251,11 @@ commandLoop st@(ReadState{chars = cs@(xs,ys), historyState = (h1,h2) }) =
 			      putStr ys'
 			      moveLeft (length ys')
 			      loop $ \ (xs, _:ys) -> (xs, ys)
+		    DeleteToEnd ->
+			   do let n = length ys
+			      putStr $ replicate n ' '
+			      moveLeft n
+			      loop $ \ (xs,_) -> (xs, "")
 		    HistoryPrev | not (null h1) ->
 			   do let h = head h1
 			      replaceLine xs h
@@ -277,6 +293,11 @@ commandLoop st@(ReadState{chars = cs@(xs,ys), historyState = (h1,h2) }) =
 						 -- FIXME: allow C-d and/or double tab and/or asking to display all
 						 commandLoop st
 		    EndOfFile | null xs && null ys -> return st{ gotEOF = True }
+		    Undo -> 
+			do
+			-- FIXME: implement
+			debug "UNDO"
+			commandLoop st
 		    _ -> commandLoop st
 	   where loop = commandLoop . modifyChars st
 		 loopHistory cf hf = commandLoop $ modifyChars (modifyHistoryState st hf) cf
