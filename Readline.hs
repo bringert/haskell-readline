@@ -1,4 +1,22 @@
--- Copyright (C) Anders Carlsson, Bjorn Bringert
+-----------------------------------------------------------
+-- |
+-- Module      :  Readline
+-- Copyright   :  Anders Carlsson 2004, 
+--                Bjorn Bringert 2004
+-- License     :  BSD-style
+--
+-- Maintainer  :  Bjorn Bringert, bjorn@bringert.net
+-- Stability   :  experimental
+-- Portability :  non-portable
+--
+-- A simple readline replacement module in pure Haskell.
+--
+-- TODO
+-- 
+-- - Support undo
+-- - Support yanking (pasting) 
+--
+-----------------------------------------------------------
 module Readline (readline, addHistory) where
 
 import DirectoryExt
