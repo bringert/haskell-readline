@@ -25,7 +25,7 @@ import Control.Exception (finally)
 import Control.Monad
 import Data.Char (isSpace)
 import Data.IORef
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, inits)
 import System.IO
 import System.IO.Unsafe (unsafePerformIO)
 import System.Directory (getDirectoryContents, doesDirectoryExist)
@@ -105,6 +105,11 @@ atLeast :: Int -> [a] -> Bool
 atLeast n _ | n <= 0 = True
 atLeast n [] = False
 atLeast n (x:xs) = atLeast (n-1) xs
+
+-- FIXME: not very efficient
+commonPrefix :: Eq a => [[a]] -> [a]
+commonPrefix [] = []
+commonPrefix xs@(x:_) = last [p | p <- inits x, all (p `isPrefixOf`) xs]
 
 --
 -- * List with a cursor
@@ -210,7 +215,9 @@ getCompletion pref =
 		      PartialCompletion (x ++ pathSeparator)
 		    else
 		      FullCompletion x
-	    xs -> return $ AmbiguousCompletion xs
+	    xs -> case commonPrefix xs of
+				       "" -> return $ AmbiguousCompletion xs
+				       x  -> return $ PartialCompletion x
 
 -- FIXME: ignore hidden files?
 getCompletions :: String -> IO [String]
@@ -306,10 +313,11 @@ commandLoop st@(ReadState{chars = cs@(xs,ys), historyState = (h1,h2) }) =
 						  debug ("No completion for prefix " ++ show pref)
 				                  -- FIXME: beep?
 						  commandLoop st 
-				  AmbiguousCompletion xs -> do
-						 debug ("Ambiguous completion for prefix " ++ show pref)
-						 -- FIXME: allow C-d and/or double tab and/or asking to display all
-						 commandLoop st
+				  AmbiguousCompletion xs -> 
+				      do
+				      debug ("Ambiguous completion for prefix " ++ show pref)
+				      -- FIXME: allow C-d and/or double tab and/or asking to display all
+				      commandLoop st
 		    EndOfFile | null xs && null ys -> return st{ gotEOF = True }
 		    Undo -> 
 			do
