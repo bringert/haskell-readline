@@ -2,9 +2,12 @@
 module Readline (readline, addHistory) where
 
 import Control.Monad
+import Data.Char (isSpace)
 import Data.IORef
+import Data.List (isPrefixOf)
 import System.IO
 import System.IO.Unsafe (unsafePerformIO)
+import System.Directory (getCurrentDirectory, getDirectoryContents)
 
 data Command 
     = Move Cursor
@@ -14,6 +17,7 @@ data Command
     | Char Char
     | HistoryPrev
     | HistoryNext
+    | Complete
     deriving Show
 
 data Cursor 
@@ -68,8 +72,8 @@ toStart l = ([], toList l)
 toEnd :: CursorList a -> CursorList a
 toEnd (xs,ys) = (xs ++ reverse ys, [])
 
-insert :: a -> CursorList a -> CursorList a
-insert x (xs,ys) = (x:xs, ys)
+insert :: [a] -> CursorList a -> CursorList a
+insert x (xs,ys) = (reverse x ++ xs, ys)
 
 set :: [a] -> CursorList a -> CursorList a
 set xs _ = mkCursorList xs
@@ -135,22 +139,44 @@ replaceLine old new =
        moveLeft (length sp)
 
 --
+-- * Tab completion
+--
+
+-- FIXME: allow C-d and/or double tab and/or asking to display all
+getCompletion :: String -> IO (Maybe String)
+getCompletion pref =
+    do
+    cs <- getCompletions pref
+    case cs of
+	    [] -> return Nothing
+	    [x] -> return $ Just x
+	    xs -> return Nothing
+
+getCompletions :: String -> IO [String]
+getCompletions pref =
+    do
+    pwd <- getCurrentDirectory
+    fs <- getDirectoryContents pwd
+    return $ filter (pref `isPrefixOf`) fs
+
+--
 -- * Input to Command
 --
 
 commands :: Commands
 commands = 
-    [("\n", Accept),
-     (prevStr, Move Previous),
-     (nextStr, Move Next),
-     ("\SOH", Move Home),
-     ("\ENQ", Move End),
-     ("\ESC[H", Move Home),
-     ("\ESC[F", Move End),
-     ("\DEL", DeletePrev),
+    [("\n",      Accept),
+     ("\ESC[D",  Move Previous),
+     ("\ESC[C",  Move Next),
+     ("\SOH",    Move Home),
+     ("\ESC[H",  Move Home),
+     ("\ENQ",    Move End),
+     ("\ESC[F",  Move End),
+     ("\DEL",    DeletePrev),
      ("\ESC[3~", DeleteCurr),
-     ("\ESC[A", HistoryPrev),
-     ("\ESC[B", HistoryNext)
+     ("\ESC[A",  HistoryPrev),
+     ("\ESC[B",  HistoryNext),
+     ("\t",      Complete)
     ]
      
 getCommand :: Commands -> IO Command
@@ -185,7 +211,7 @@ commandLoop st@(ReadState{chars = cs@(xs,ys), historyState = (h1,h2) }) =
 		    Char c -> 
 			   do putStr (c:ys)
 			      moveLeft (length ys)
-			      loop $ insert c
+			      loop $ insert [c]
 		    DeletePrev | not (null xs) ->
 			   do moveLeft 1
 			      let ys' = ys ++ " "
@@ -208,10 +234,24 @@ commandLoop st@(ReadState{chars = cs@(xs,ys), historyState = (h1,h2) }) =
 		    Accept -> 
 			   do putStrLn ""
 			      return st
-		    _ -> do commandLoop st
+		    Complete -> 
+			   do
+			   let pref = reverse $ takeWhile (not.isSpace) xs
+			   x <- getCompletion pref
+			   case x of 
+				  Just s -> do let s' = drop (length pref) s ++ " "
+					       putStr (s'++ys)
+					       debug ("complete: " ++ s)
+					       moveLeft (length ys)
+					       loop $ insert s' 
+				  Nothing -> do debug ("No completion: " ++ show pref)
+				                -- FIXME: beep?
+					        commandLoop st 
+		    _ -> commandLoop st
 	   where loop = commandLoop . modifyChars st
 		 loopHistory cf hf = commandLoop $ modifyChars (modifyHistoryState st hf) cf
 
+-- NOTE: hugs needs the hGetEcho / hSetEcho calls to be removed
 withNoBuffOrEcho :: IO a -> IO a
 withNoBuffOrEcho m = 
     do
@@ -235,7 +275,3 @@ readline prompt =
        st <- initState
        st' <- withNoBuffOrEcho (commandLoop st)
        return $ Just $ toList $ chars st'
-
-
-
-							    
