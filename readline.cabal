@@ -1,0 +1,11 @@
+Name: pure-hs-readline
+Version: 0.1
+Copyright: Anders Carlsson, Bjorn Bringert
+Maintainer: bjorn@bringert.net
+Author: Anders Carlsson, Bjorn Bringert
+License: BSD4
+Build-depends: haskell98, base
+Synopsis: A pure Haskell implementation of a subset of the
+  readline library for vt100-like terminals.
+Exposed-Modules: Readline
+Ghc-options: -O2

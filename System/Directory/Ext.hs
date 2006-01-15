@@ -1,5 +1,5 @@
 -- | Some utility functions for path names not included in System.Directory.
-module DirectoryExt (pathSeparator, pathJoin, resolvePath, getDirFile) where
+module System.Directory.Ext (pathSeparator, pathJoin, resolvePath, getDirFile) where
 
 import Data.List (intersperse, isPrefixOf, tails, findIndex)
 import Data.Maybe (fromJust)

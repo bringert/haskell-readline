@@ -1,5 +1,5 @@
 GHC = ghc
-GHCFLAGS = -package-conf $(HOME)/.ghc-packages
+GHCFLAGS = 
 
 test: *.hs
 	$(GHC) $(GHCFLAGS) --make -o $@ test.hs

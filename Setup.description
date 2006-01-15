@@ -1,6 +1,0 @@
-Name: MyReadline
-Version: 1.0
-License: BSD4
-Modules: Readline, DirectoryExt
-Exposed-Modules: Readline
-

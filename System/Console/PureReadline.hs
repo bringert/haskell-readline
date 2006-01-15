@@ -1,6 +1,6 @@
 -----------------------------------------------------------
 -- |
--- Module      :  Readline
+-- Module      :  System.Console.PureReadline
 -- Copyright   :  Anders Carlsson 2004, 
 --                Bjorn Bringert 2004
 -- License     :  BSD-style
@@ -23,9 +23,9 @@
 -- * Support yanking (pasting) 
 --
 -----------------------------------------------------------
-module Readline (readline, addHistory) where
+module System.Console.PureReadline (readline, addHistory) where
 
-import DirectoryExt
+import System.Directory.Ext
 
 import Control.Exception (finally)
 import Control.Monad
