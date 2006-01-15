@@ -7,5 +7,6 @@ License: BSD4
 Build-depends: haskell98, base
 Synopsis: A pure Haskell implementation of a subset of the
   readline library for vt100-like terminals.
-Exposed-Modules: Readline
+Exposed-modules: System.Console.PureReadline
+Other-modules: System.Directory.Ext
 Ghc-options: -O2
