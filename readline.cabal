@@ -3,9 +3,12 @@ Version: 2006.3.23
 Copyright: Anders Carlsson, Bjorn Bringert
 Maintainer: bjorn@bringert.net
 Author: Anders Carlsson, Bjorn Bringert
+Homepage: http://www.cs.chalmers.se/~bringert/darcs/readline/doc/
 License: BSD4
 Build-depends: haskell98, base
-Synopsis: A pure Haskell implementation of a subset of the
+Synopsis: A basic readline implementation in pure Haskell
+Description: 
+  This is a pure Haskell implementation of a subset of the
   readline library for vt100-like terminals.
 Exposed-modules: System.Console.PureReadline
 Other-modules: System.Directory.Ext
