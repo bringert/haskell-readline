@@ -14,12 +14,19 @@
 -- TODO
 --
 -- * Support non-vt100 terminals
+--
 -- * Support non-posix pathnames in tab completion
+--
 -- * Support .inputrc
+--
 -- * Show alternatives when completion is ambiguous
+--
 -- * Restore terminal settings when interrupted
+--
 -- * ifdef away echoing stuff for Hugs support
+--
 -- * Support undo
+--
 -- * Support yanking (pasting) 
 --
 -----------------------------------------------------------
